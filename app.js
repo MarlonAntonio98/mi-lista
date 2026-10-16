@@ -4,11 +4,10 @@ if (window.top !== window.self) { document.documentElement.classList.add('framed
 
 const $ = s => document.querySelector(s);
 const main = $('#main'), ov = $('#overlay');
-const APP_VERSION = 1;
-const PRIO = {need:'Lo necesito', want:'Lo quiero', someday:'Algún día'}, PRIO_ORDER = {need:0, want:1, someday:2};
-const FILTERS = [['active','Todo'],['need','Lo necesito'],['want','Lo quiero'],['someday','Algún día'],['bought','Comprado']];
+const APP_VERSION = 3;
+const FILTERS = [['active','Mi lista'],['bought','Comprados']];
 const STORES = [[/(^|\.)(amazon\.|a\.co$|amzn\.)/,'Amazon'],[/shein\./,'Shein'],[/temu\./,'Temu'],[/ebay\./,'eBay'],[/walmart\./,'Walmart'],[/aliexpress\./,'AliExpress'],[/bestbuy\./,'Best Buy'],[/mercadolibre\./,'Mercado Libre'],[/(^|\.)target\.com$/,'Target'],[/costco\./,'Costco'],[/samsung\./,'Samsung'],[/(^|\.)apple\.com$/,'Apple'],[/siman\./,'Siman'],[/prado\./,'Prado'],[/sephora\./,'Sephora'],[/nike\./,'Nike'],[/adidas\./,'Adidas']];
-const I = {plus:'<path d="M12 5v14M5 12h14"/>',back:'<path d="m15 6-6 6 6 6"/>',gear:'<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1"/>',edit:'<path d="M4 20h4L19 9l-4-4L4 16v4z"/>',ext:'<path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"/>',x:'<path d="M6 6l12 12M18 6 6 18"/>',camera:'<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',chev:'<path d="m9 6 6 6-6 6"/>',down:'<path d="M12 4v12M7 11l5 5 5-5M5 20h14"/>',up:'<path d="M12 16V4M7 9l5-5 5 5M5 20h14"/>',tag:'<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.5"/>',check:'<path d="m5 12 5 5 9-10"/>'};
+const I = {plus:'<path d="M12 5v14M5 12h14"/>',back:'<path d="m15 6-6 6 6 6"/>',gear:'<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1"/>',edit:'<path d="M4 20h4L19 9l-4-4L4 16v4z"/>',ext:'<path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"/>',x:'<path d="M6 6l12 12M18 6 6 18"/>',camera:'<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',chev:'<path d="m9 6 6 6-6 6"/>',down:'<path d="M12 4v12M7 11l5 5 5-5M5 20h14"/>',up:'<path d="M12 16V4M7 9l5-5 5 5M5 20h14"/>',tag:'<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.5"/>',check:'<path d="m5 12 5 5 9-10"/>',grip:'<circle cx="9" cy="6" r="1.3"/><circle cx="15" cy="6" r="1.3"/><circle cx="9" cy="12" r="1.3"/><circle cx="15" cy="12" r="1.3"/><circle cx="9" cy="18" r="1.3"/><circle cx="15" cy="18" r="1.3"/>'};
 const ic = (n, s = 22) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${I[n]}</svg>`;
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid = () => Date.now().toString(36) + Array.from(crypto.getRandomValues(new Uint8Array(6)), b => (b % 36).toString(36)).join('');
@@ -32,7 +31,7 @@ const DB = { db:null,
   clear(s){ return this.req(s,'readwrite',o=>o.clear()); } };
 
 /* ---------- Estado ---------- */
-let items = [], cfg = {k:'cfg', rate:0, fee:0, tax:0}, view = {name:'list'}, hist = [], filter = 'active', draft = null, installEvt = null, sheetRes = null;
+let items = [], reorder = null, view = {name:'list'}, hist = [], filter = 'active', draft = null, installEvt = null, sheetRes = null;
 
 /* ---------- Validación ---------- */
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/, IMG_RE = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/, ID_RE = /^[a-z0-9]{6,40}$/;
@@ -41,15 +40,13 @@ const safeUrl = u => { try { const x = new URL(u); return /^https?:$/.test(x.pro
 function clean(i){ if (!i || typeof i !== 'object' || !ID_RE.test(i.id)) return null; const name = str(i.name, 160).trim(); if (!name) return null;
   const prices = Array.isArray(i.prices) ? i.prices.filter(p => p && DATE_RE.test(p.d) && num(p.p) !== null).map(p => ({d:p.d, p:num(p.p)})).slice(-200) : [];
   const b = i.bought && DATE_RE.test(i.bought.d) && num(i.bought.p) !== null ? {d:i.bought.d, p:num(i.bought.p)} : null;
-  return {id:i.id, name, store:str(i.store,60), url:safeUrl(i.url||''), photo:typeof i.photo==='string'&&IMG_RE.test(i.photo)?i.photo:null, prio:PRIO[i.prio]?i.prio:'want', prices, target:i.target==null?null:num(i.target), ship:!!i.ship, lb:i.lb==null?null:num(i.lb), notes:str(i.notes,2000), created:+i.created||Date.now(), updated:+i.updated||Date.now(), bought:b}; }
+  return {id:i.id, name, store:str(i.store,60), url:safeUrl(i.url||''), photo:typeof i.photo==='string'&&IMG_RE.test(i.photo)?i.photo:null, order:isFinite(+i.order)?+i.order:0, sel:!!i.sel, prices, target:i.target==null?null:num(i.target), notes:str(i.notes,2000), created:+i.created||Date.now(), updated:+i.updated||Date.now(), bought:b}; }
 
 /* ---------- Cálculos ---------- */
 const cur = i => i.prices.length ? i.prices[i.prices.length-1].p : null;
 const prev = i => i.prices.length > 1 ? i.prices[i.prices.length-2].p : null;
 const low = i => i.prices.length ? Math.min(...i.prices.map(p => p.p)) : null;
 const high = i => i.prices.length ? Math.max(...i.prices.map(p => p.p)) : null;
-const extras = (i, p) => i.ship && p != null ? {ship:(i.lb||0) * cfg.rate + cfg.fee, tax:p * cfg.tax / 100} : {ship:0, tax:0};
-const landed = (i, p = cur(i)) => { if (p == null) return null; const e = extras(i, p); return p + e.ship + e.tax; };
 const hit = i => !i.bought && i.target != null && cur(i) != null && cur(i) <= i.target;
 function badge(i){
   if (i.bought) return {k:'muted', t:`Comprado el ${fmtD(i.bought.d)}`};
@@ -75,40 +72,39 @@ async function saveItem(i){ i.updated = Date.now(); await DB.put('items', i); co
 
 /* ---------- Vistas ---------- */
 const thumb = i => `<span class="thumb">${i.photo?`<img src="${i.photo}" alt="">`:`<span class="ph">${esc(i.name.charAt(0).toUpperCase())}</span>`}</span>`;
-function rowHTML(i){ const b = badge(i), c = cur(i), L = i.bought ? i.bought.p : landed(i);
-  return `<button class="item" data-open="${esc(i.id)}">${thumb(i)}<span class="it-main"><span class="it-name">${esc(i.name)}</span><span class="it-meta">${i.store?`<span>${esc(i.store)}</span>`:''}${i.bought?'':`<span class="prio prio-${i.prio}">${PRIO[i.prio]}</span>`}</span>${b?`<span class="tag tag-${b.k}">${esc(b.t)}</span>`:''}</span><span class="it-price">${L!=null?`<b>${money(L)}</b>${!i.bought&&i.ship&&c!=null?'<small>con envío</small>':''}`:'<span class="none">Sin precio</span>'}</span></button>`; }
-function listFor(f){ let l = items.filter(i => f === 'bought' ? i.bought : !i.bought);
-  if (PRIO[f]) l = l.filter(i => i.prio === f);
+function rowHTML(i, movable){ const b = badge(i), L = i.bought ? i.bought.p : cur(i);
+  return `<div class="item-wrap" data-id="${esc(i.id)}">${i.bought?'':`<button class="sel${i.sel?' on':''}" data-sel="${esc(i.id)}" aria-pressed="${i.sel}" aria-label="${i.sel?'Quitar de la suma':'Incluir en la suma'}">${ic('check',16)}</button>`}<button class="item" data-open="${esc(i.id)}">${thumb(i)}<span class="it-main"><span class="it-name">${esc(i.name)}</span>${i.store?`<span class="it-meta">${esc(i.store)}</span>`:''}${b?`<span class="tag tag-${b.k}">${esc(b.t)}</span>`:''}</span><span class="it-price">${L!=null?`<b>${money(L)}</b>`:'<span class="none">Sin precio</span>'}</span></button>${movable?`<span class="grip" aria-label="Mantén presionado y arrastra para mover" title="Mover">${ic('grip',20)}</span>`:''}</div>`; }
+function listFor(f){ const l = items.filter(i => f === 'bought' ? i.bought : !i.bought);
   if (f === 'bought') return l.sort((a,b) => b.bought.d.localeCompare(a.bought.d));
-  return l.sort((a,b) => (hit(b) - hit(a)) || PRIO_ORDER[a.prio] - PRIO_ORDER[b.prio] || b.updated - a.updated); }
+  return l.sort((a,b) => a.order - b.order || b.created - a.created); }
 function viewList(){
   const active = items.filter(i => !i.bought), bought = items.filter(i => i.bought);
   let h = `<header class="bar"><h1 class="title">Mi lista</h1><div class="bar-actions">${installEvt?'<button class="pill-btn" data-act="install">Instalar</button>':''}<button class="icon-btn" data-act="settings" aria-label="Ajustes">${ic('gear')}</button><button class="icon-btn icon-btn-solid" data-act="new" aria-label="Agregar deseo">${ic('plus')}</button></div></header>`;
   if (!items.length) return h + `<div class="empty"><div class="empty-mark">${ic('tag',30)}</div><h2>Empieza tu lista</h2><p>Guarda lo que quieres comprar, sigue su precio y entérate cuando baje a lo que estás dispuesta a pagar.</p><button class="btn btn-primary" data-act="new">Agregar mi primer deseo</button><p class="fine">También puedes compartir un producto desde Chrome o la app de la tienda y elegir Mi lista.</p></div>`;
   if (filter === 'bought'){ const spent = bought.reduce((s,i) => s + i.bought.p, 0), saved = bought.reduce((s,i) => { const hi = high(i); return s + (hi && hi > i.bought.p ? hi - i.bought.p : 0); }, 0);
     h += `<div class="summary"><div class="metric"><span>Gastado</span><b>${money(spent)}</b></div><div class="metric"><span>Ahorrado esperando</span><b class="good">${money(saved)}</b></div></div>`; }
-  else { const need = active.filter(i => i.prio === 'need').reduce((s,i) => s + (landed(i) || 0), 0), hits = active.filter(hit).length;
-    h += `<div class="summary"><div class="metric"><span>Lo que necesitas</span><b>${money(need)}</b></div><div class="metric"><span>En precio objetivo</span><b class="${hits?'good':''}">${hits}</b></div></div>`; }
+  else { const total = active.reduce((s,i) => s + (cur(i) || 0), 0), sel = active.filter(i => i.sel), noPrice = (sel.length ? sel : active).filter(i => cur(i) == null).length;
+    h += sel.length
+      ? `<div class="summary one"><div class="metric"><span>Seleccionados (${sel.length} de ${active.length})</span><b>${money(sel.reduce((s,i) => s + (cur(i) || 0), 0))}</b><div class="metric-foot"><span>Toda tu lista: ${money(total)}</span><button class="link-btn" data-act="clearSel">Quitar selección</button></div>${noPrice?`<small class="metric-note">${noPrice} sin precio no se suma${noPrice>1?'n':''}.</small>`:''}</div></div>`
+      : `<div class="summary one"><div class="metric"><span>Total de tu lista</span><b>${money(total)}</b>${active.length>1?'<small class="metric-note">Marca los círculos para sumar solo algunos.</small>':''}${noPrice?`<small class="metric-note">${noPrice} sin precio no se suma${noPrice>1?'n':''}.</small>`:''}</div></div>`; }
   h += `<div class="chips">${FILTERS.map(([k,n]) => `<button class="chip ${filter===k?'on':''}" data-filter="${k}">${n}</button>`).join('')}</div>`;
-  if (filter !== 'bought' && !cfg.rate && active.some(i => i.ship)) h += `<button class="note" data-act="settings">Configura la tarifa de tu casillero en Ajustes para ver el costo real con envío.</button>`;
   const l = listFor(filter);
-  return h + (l.length ? `<div class="list">${l.map(rowHTML).join('')}</div>` : `<p class="empty-sm">${filter==='bought'?'Todavía no has marcado nada como comprado.':'No hay nada en esta categoría.'}</p>`); }
+  return h + (l.length ? `<div class="list">${l.map(i => rowHTML(i, filter === 'active' && l.length > 1)).join('')}</div>` : `<p class="empty-sm">${filter==='bought'?'Todavía no has marcado nada como comprado.':'No hay nada en esta categoría.'}</p>`); }
 function spark(i){ const ps = i.prices; if (ps.length < 2) return '';
   const vals = ps.map(p => p.p).concat(i.target != null ? [i.target] : []), mn = Math.min(...vals), mx = Math.max(...vals), span = mx - mn || 1, W = 300, H = 90, P = 8;
   const x = k => P + k * (W - 2*P) / (ps.length - 1), y = v => H - P - (v - mn) / span * (H - 2*P);
   const pts = ps.map((p,k) => `${x(k).toFixed(1)},${y(p.p).toFixed(1)}`).join(' '), last = ps[ps.length-1];
   return `<div class="chart"><div class="chart-head"><span>Más bajo ${money(low(i))}</span><span>Más alto ${money(high(i))}</span></div><svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Historial de precio">${i.target!=null?`<line class="tg" x1="0" x2="${W}" y1="${y(i.target).toFixed(1)}" y2="${y(i.target).toFixed(1)}"/>`:''}<polyline class="ln" points="${pts}"/><circle class="pt" cx="${x(ps.length-1).toFixed(1)}" cy="${y(last.p).toFixed(1)}" r="3.5"/></svg></div>`; }
 function viewDetail(){ const i = curItem(); if (!i){ view = {name:'list'}; return viewList(); }
-  const c = cur(i), b = badge(i), e = extras(i, c), L = landed(i);
+  const c = cur(i), b = badge(i);
   let h = `<header class="bar"><button class="icon-btn" data-act="back" aria-label="Volver">${ic('back')}</button><div class="bar-actions">${i.url?`<a class="icon-btn" href="${esc(i.url)}" target="_blank" rel="noopener noreferrer" aria-label="Abrir en la tienda">${ic('ext')}</a>`:''}<button class="icon-btn" data-act="edit" aria-label="Editar">${ic('edit')}</button></div></header>`;
   if (i.photo) h += `<button class="hero-photo" data-act="viewPhoto" aria-label="Ver foto en grande"><img src="${i.photo}" alt=""></button>`;
-  h += `<h1 class="d-name">${esc(i.name)}</h1><div class="d-meta">${i.store?`<span>${esc(i.store)}</span>`:''}${i.bought?'':`<span class="prio prio-${i.prio}">${PRIO[i.prio]}</span>`}</div>`;
+  h += `<h1 class="d-name">${esc(i.name)}</h1>${i.store?`<div class="d-meta"><span>${esc(i.store)}</span></div>`:'<div class="d-meta"></div>'}`;
   if (i.bought){
     const hi = high(i), saved = hi && hi > i.bought.p ? hi - i.bought.p : 0;
     h += `<div class="price-row"><p class="price-big">${money(i.bought.p)}</p></div><p class="price-sub">Lo compraste el ${fmtD(i.bought.d)}${saved?`. Ahorraste ${money(saved)} frente al precio más alto que viste.`:'.'}</p>${spark(i)}<button class="btn btn-secondary" data-act="unbuy">Volver a la lista de deseos</button>`;
   } else {
-    h += c != null ? `<div class="price-row"><p class="price-big">${money(c)}</p>${b&&b.k!=='muted'&&b.t!=='Precio objetivo alcanzado'?`<span class="tag tag-${b.k}">${esc(b.t)}</span>`:''}</div><p class="price-sub">Precio en la tienda, actualizado el ${fmtD(i.prices[i.prices.length-1].d)}.</p>` : `<p class="price-sub">Todavía no has anotado un precio.</p>`;
-    if (i.ship && c != null) h += `<div class="box"><div class="row"><span>Precio</span><b>${money(c)}</b></div><div class="row"><span>Envío por casillero${i.lb?` (${i.lb} lb)`:''}</span><b>${cfg.rate?money(e.ship):'Sin configurar'}</b></div>${cfg.tax?`<div class="row"><span>Impuestos (${cfg.tax} %)</span><b>${money(e.tax)}</b></div>`:''}<div class="row total"><span>Puesto en tu casa</span><b>${money(L)}</b></div></div>`;
+    h += c != null ? `<div class="price-row"><p class="price-big">${money(c)}</p>${b&&b.k!=='muted'&&b.t!=='Precio objetivo alcanzado'?`<span class="tag tag-${b.k}">${esc(b.t)}</span>`:''}</div><p class="price-sub">Actualizado el ${fmtD(i.prices[i.prices.length-1].d)}.</p>` : `<p class="price-sub">Todavía no has anotado un precio.</p>`;
     if (i.target != null) h += hit(i) ? `<div class="target hit">Llegó a tu precio objetivo de ${money(i.target)}<small>Es buen momento para comprarlo.</small></div>` : `<div class="target">Tu precio objetivo es ${money(i.target)}${c!=null?`<small>Falta que baje ${money(c - i.target)}.</small>`:''}</div>`;
     h += spark(i);
     h += `<button class="btn btn-primary" data-act="updPrice">${ic('tag',20)} ${c!=null?'Actualizar precio':'Anotar precio'}</button>${i.url?`<a class="btn btn-secondary" href="${esc(i.url)}" target="_blank" rel="noopener noreferrer">${ic('ext',20)} Abrir en la tienda</a>`:''}<button class="btn btn-secondary" data-act="buy">${ic('check',20)} Marcar como comprado</button>`;
@@ -123,18 +119,10 @@ function viewForm(){ const d = draft, c = d._new ? d._price : null;
   <label class="field"><span>Enlace del producto</span><input id="f_url" type="url" inputmode="url" value="${esc(d.url)}" placeholder="https://" ${NO_SPELL}><em class="err" id="e_url"></em></label>
   <label class="field"><span>Tienda</span><input id="f_store" value="${esc(d.store)}" placeholder="Se llena sola con el enlace" maxlength="60" ${NO_SPELL}></label>
   <div class="two">${d._new?`<label class="field"><span>Precio actual</span><div class="money"><input id="f_price" type="text" inputmode="decimal" value="${c!=null?c:''}" placeholder="0.00" ${NO_SPELL}></div></label>`:''}<label class="field"><span>Precio objetivo</span><div class="money"><input id="f_target" type="text" inputmode="decimal" value="${d.target!=null?d.target:''}" placeholder="Opcional" ${NO_SPELL}></div></label></div>
-  <div class="field"><span>Prioridad</span><div class="seg">${Object.entries(PRIO).map(([k,n]) => `<button type="button" class="${d.prio===k?'on':''}" data-prio="${k}">${n}</button>`).join('')}</div></div>
-  <label class="check"><input type="checkbox" id="f_ship" ${d.ship?'checked':''}> Viene por casillero</label>
-  <label class="field" id="lbField" ${d.ship?'':'hidden'}><span>Peso aproximado (libras)</span><input id="f_lb" type="text" inputmode="decimal" value="${d.lb!=null?d.lb:''}" placeholder="1.5" ${NO_SPELL}><small>Si no sabes, busca el peso de envío en la página del producto.</small></label>
   <div class="field"><span>Foto</span>${photoSlot()}</div>
   <label class="field"><span>Notas</span><textarea id="f_notes" rows="3" placeholder="Color, talla, alternativa más barata" maxlength="2000" ${NO_SPELL}>${esc(d.notes)}</textarea></label>`; }
 function viewSettings(){ const standalone = window.matchMedia('(display-mode: standalone)').matches;
   return `<header class="bar"><button class="icon-btn" data-act="back" aria-label="Volver">${ic('back')}</button><h1 class="title title-sm">Ajustes</h1><span class="spacer"></span></header>
-  <h2 class="section">Tu casillero</h2><div class="box">
-  <label class="field"><span>Tarifa por libra</span><div class="money"><input id="c_rate" type="text" inputmode="decimal" value="${cfg.rate||''}" placeholder="0.00" ${NO_SPELL}></div></label>
-  <label class="field"><span>Cargo fijo por paquete</span><div class="money"><input id="c_fee" type="text" inputmode="decimal" value="${cfg.fee||''}" placeholder="0.00" ${NO_SPELL}></div><small>Manejo, seguro u otro cargo que te cobren siempre. Déjalo vacío si no aplica.</small></label>
-  <label class="field"><span>Impuestos (%)</span><input id="c_tax" type="text" inputmode="decimal" value="${cfg.tax||''}" placeholder="0" ${NO_SPELL}><small>Se calcula sobre el precio del producto. Déjalo vacío si no pagas impuestos.</small></label>
-  <button class="btn btn-primary" data-act="saveCfg">Guardar tarifas</button></div>
   <h2 class="section">Instalación</h2><div class="box">${standalone?'<p class="fine">Ya estás usando la app instalada.</p>':installEvt?`<button class="set-row" data-act="install"><span>Instalar Mi lista en el celular<small>Queda como una app con su propio ícono</small></span><span class="chev">${ic('down',18)}</span></button>`:'<p class="fine">Chrome todavía no ofrece instalarla. Abre la app en Chrome con internet, espera unos segundos y vuelve a entrar aquí.</p>'}</div>
   <h2 class="section">Copia de seguridad</h2><div class="box">
   <button class="set-row" data-act="exportBk"><span>Descargar copia<small>Tu lista, precios y fotos en un archivo</small></span><span class="chev">${ic('down',18)}</span></button>
@@ -148,7 +136,7 @@ function compress(file){ return new Promise((res, rej) => { if (file.size > 40e6
   img.onerror = () => { URL.revokeObjectURL(url); rej(); }; img.src = url; }); }
 
 /* ---------- Acciones ---------- */
-function newDraft(p){ return Object.assign({_new:true, id:uid(), name:'', store:'', url:'', photo:null, prio:'want', prices:[], target:null, ship:false, lb:null, notes:'', bought:null, _price:null}, p || {}); }
+function newDraft(p){ return Object.assign({_new:true, id:uid(), name:'', store:'', url:'', photo:null, order:0, prices:[], target:null, notes:'', bought:null, _price:null}, p || {}); }
 const A = {
   settings(){ go({name:'settings'}); },
   new(){ draft = newDraft(); go({name:'form'}); },
@@ -160,8 +148,8 @@ const A = {
     const name = $('#f_name').value.trim(), rawUrl = $('#f_url').value.trim(), url = rawUrl ? safeUrl(/^https?:\/\//i.test(rawUrl) ? rawUrl : 'https://' + rawUrl) : '';
     if (!name){ $('#e_name').textContent = 'Escribe qué quieres comprar.'; $('#f_name').focus(); return; }
     if (rawUrl && !url){ $('#e_url').textContent = 'Ese enlace no parece válido.'; $('#f_url').focus(); return; }
-    const it = clean({...draft, name, url, store:$('#f_store').value.trim() || (url ? storeFrom(url) : ''), target:$('#f_target').value.trim() ? num($('#f_target').value) : null, ship:$('#f_ship').checked, lb:$('#f_lb').value.trim() ? num($('#f_lb').value) : null, notes:$('#f_notes').value.trim()});
-    if (draft._new){ const p = $('#f_price').value.trim() ? num($('#f_price').value) : null; if (p != null) it.prices = [{d:todayKey(), p}]; }
+    const it = clean({...draft, name, url, store:$('#f_store').value.trim() || (url ? storeFrom(url) : ''), target:$('#f_target').value.trim() ? num($('#f_target').value) : null, notes:$('#f_notes').value.trim()});
+    if (draft._new){ const p = $('#f_price').value.trim() ? num($('#f_price').value) : null; if (p != null) it.prices = [{d:todayKey(), p}]; it.order = Math.min(0, ...items.map(x => x.order)) - 1; }
     try { await saveItem(it); } catch(e){ toast('No se pudo guardar. Puede que falte espacio en el celular.'); return; }
     const isNew = draft._new; draft = null; toast('Guardado');
     if (isNew){ view = {name:'detail', id:it.id}; render(); window.scrollTo(0,0); } else back(); },
@@ -170,9 +158,10 @@ const A = {
     const d = todayKey(); if (i.prices.length && i.prices[i.prices.length-1].d === d) i.prices[i.prices.length-1].p = p; else i.prices.push({d, p});
     if (i.prices.length > 200) i.prices = i.prices.slice(-200);
     await saveItem(i); render(); toast(hit(i) ? 'Llegó a tu precio objetivo' : 'Precio actualizado'); },
-  async buy(){ const i = curItem(); if (!i) return; const L = landed(i);
-    const p = await priceSheet('¿Cuánto pagaste?', 'Anota el total que pagaste, con envío si aplica.', L != null ? Math.round(L*100)/100 : null, 'Marcar como comprado'); if (p == null) return;
-    i.bought = {d:todayKey(), p}; await saveItem(i); render(); toast('Marcado como comprado'); },
+  async buy(){ const i = curItem(); if (!i) return; const L = cur(i);
+    const p = await priceSheet('¿Cuánto pagaste?', 'Anota el total que pagaste.', L, 'Marcar como comprado'); if (p == null) return;
+    i.bought = {d:todayKey(), p}; i.sel = false; await saveItem(i); render(); toast('Marcado como comprado'); },
+  async clearSel(){ const ch = items.filter(i => i.sel); ch.forEach(i => { i.sel = false; }); render(); for (const i of ch){ try { await DB.put('items', i); } catch(e){} } },
   async unbuy(){ const i = curItem(); if (!i) return; i.bought = null; await saveItem(i); render(); toast('Volvió a tu lista de deseos'); },
   async delete(){ const i = curItem(); if (!i) return; if (!await confirmBox(`¿Eliminar ${i.name}?`, 'Se borra de tu lista junto con su historial de precio.', 'Eliminar')) return;
     await DB.del('items', i.id); items = items.filter(x => x.id !== i.id); hist = hist.filter(v => v.id !== i.id); toast('Eliminado'); back(); },
@@ -181,9 +170,8 @@ const A = {
   sheetOk(){ closeOverlay(); if (sheetRes){ const r = sheetRes; sheetRes = null; r(true); } },
   sheetNo(){ closeOverlay(); if (sheetRes){ const r = sheetRes; sheetRes = null; r(null); } },
   sheetPrice(){ const v = num($('#sheetPrice').value); if (v == null || !$('#sheetPrice').value.trim()){ $('#sheetErr').textContent = 'Escribe un precio válido.'; return; } closeOverlay(); if (sheetRes){ const r = sheetRes; sheetRes = null; r(v); } },
-  async saveCfg(){ cfg.rate = num($('#c_rate').value) || 0; cfg.fee = num($('#c_fee').value) || 0; cfg.tax = Math.min(100, num($('#c_tax').value) || 0); await DB.put('meta', cfg); toast('Tarifas guardadas'); render(); },
   async install(){ if (!installEvt) return; const e = installEvt; installEvt = null; try { await e.prompt(); await e.userChoice; } catch(err){} render(); },
-  async exportBk(){ const data = {app:'mi-lista', v:1, created:new Date().toISOString(), cfg:{rate:cfg.rate, fee:cfg.fee, tax:cfg.tax}, items};
+  async exportBk(){ const data = {app:'mi-lista', v:1, created:new Date().toISOString(), items};
     const url = URL.createObjectURL(new Blob([JSON.stringify(data)], {type:'application/json'})), a = document.createElement('a');
     a.href = url; a.download = `mi-lista-copia-${todayKey()}.json`; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 10000); toast('Copia descargada'); },
   async wipe(){ if (!await confirmBox('¿Borrar toda la lista?', 'Se eliminan todos tus deseos, precios y fotos de este celular. No se puede deshacer.', 'Borrar todo')) return;
@@ -193,7 +181,6 @@ async function importBk(file){
   let data; try { if (file.size > 300e6) throw 0; data = JSON.parse(await file.text()); } catch(e){ return toast('Ese archivo no es una copia válida.'); }
   if (!data || data.app !== 'mi-lista' || !Array.isArray(data.items)) return toast('Ese archivo no es una copia válida.');
   let n = 0; for (const r of data.items){ const i = clean(r); if (!i) continue; try { await DB.put('items', i); const k = items.findIndex(x => x.id === i.id); k < 0 ? items.push(i) : items[k] = i; n++; } catch(e){} }
-  if (data.cfg && !cfg.rate){ cfg.rate = num(data.cfg.rate) || 0; cfg.fee = num(data.cfg.fee) || 0; cfg.tax = Math.min(100, num(data.cfg.tax) || 0); try { await DB.put('meta', cfg); } catch(e){} }
   render(); toast(n ? `${n} producto${n>1?'s':''} restaurado${n>1?'s':''}` : 'No se pudo restaurar nada.'); }
 
 /* ---------- Compartir desde otras apps ---------- */
@@ -208,17 +195,16 @@ function sharedDraft(){
 
 /* ---------- Eventos ---------- */
 document.addEventListener('click', e => {
-  const t = e.target.closest('[data-act],[data-open],[data-filter],[data-prio]'); if (!t) return;
+  const t = e.target.closest('[data-act],[data-open],[data-filter],[data-sel]'); if (!t) return;
   const ds = t.dataset;
+  if (ds.sel){ const i = items.find(x => x.id === ds.sel); if (!i) return; i.sel = !i.sel; const y = window.scrollY; render(); window.scrollTo(0, y); DB.put('items', i).catch(() => {}); return; }
   if (ds.open) return go({name:'detail', id:ds.open});
   if (ds.filter){ filter = ds.filter; return render(); }
-  if (ds.prio){ draft.prio = ds.prio; document.querySelectorAll('[data-prio]').forEach(b => b.classList.toggle('on', b === t)); return; }
   if (ds.act && A[ds.act]) A[ds.act](t);
 });
 document.addEventListener('change', async e => { const t = e.target;
   if (t.id === 'f_photo'){ const f = t.files && t.files[0]; if (!f || !draft) return; try { draft.photo = await compress(f); $('#photoSlot').outerHTML = photoSlot(); } catch(err){ toast('No se pudo cargar la foto. Prueba con otra.'); } }
-  if (t.id === 'f_import'){ const f = t.files && t.files[0]; t.value = ''; if (f) importBk(f); }
-  if (t.id === 'f_ship') $('#lbField').hidden = !t.checked; });
+  if (t.id === 'f_import'){ const f = t.files && t.files[0]; t.value = ''; if (f) importBk(f); }});
 document.addEventListener('input', e => { const t = e.target;
   if (t.id === 'f_name') $('#e_name').textContent = '';
   if (t.id === 'f_url'){ $('#e_url').textContent = ''; const st = $('#f_store'); const u = safeUrl(/^https?:\/\//i.test(t.value.trim()) ? t.value.trim() : 'https://' + t.value.trim()); if (st && !st.dataset.touched && u) st.value = storeFrom(u); }
@@ -226,6 +212,28 @@ document.addEventListener('input', e => { const t = e.target;
   if (t.id === 'sheetPrice') $('#sheetErr').textContent = ''; });
 document.addEventListener('keydown', e => {
   if (!ov.hidden){ if (e.key === 'Escape'){ if (sheetRes) A.sheetNo(); else closeOverlay(); } else if (e.key === 'Enter' && $('#sheetPrice')){ e.preventDefault(); A.sheetPrice(); } } });
+document.addEventListener('pointerdown', e => { const g = e.target.closest('.grip'); if (!g || filter !== 'active') return; e.preventDefault();
+  const el = g.closest('.item-wrap'), rows = [...document.querySelectorAll('.list .item-wrap')], idx = rows.indexOf(el); if (idx < 0) return;
+  reorder = {el, rows, idx, to:idx, h:el.getBoundingClientRect().height, y0:e.clientY, pid:e.pointerId};
+  try { g.setPointerCapture(e.pointerId); } catch(err){}
+  el.classList.add('dragging'); rows.forEach(r => { if (r !== el) r.style.transition = 'transform .22s cubic-bezier(.2,.8,.2,1)'; });
+  try { if (navigator.vibrate) navigator.vibrate(10); } catch(err){} });
+document.addEventListener('pointermove', e => { const r = reorder; if (!r || e.pointerId !== r.pid) return;
+  const dy = Math.max(-r.idx * r.h - 12, Math.min((r.rows.length - 1 - r.idx) * r.h + 12, e.clientY - r.y0));
+  r.el.style.transform = `translateY(${dy.toFixed(1)}px) scale(1.02)`;
+  const to = Math.max(0, Math.min(r.rows.length - 1, r.idx + Math.round(dy / r.h)));
+  if (to !== r.to){ r.to = to; r.rows.forEach((row, k) => { if (row === r.el) return; let s = 0;
+      if (r.idx < to && k > r.idx && k <= to) s = -r.h; else if (r.idx > to && k >= to && k < r.idx) s = r.h;
+      row.style.transform = s ? `translateY(${s}px)` : ''; });
+    try { if (navigator.vibrate) navigator.vibrate(5); } catch(err){} } });
+function endReorder(){ const r = reorder; if (!r) return; reorder = null;
+  r.el.style.transition = 'transform .2s cubic-bezier(.2,.8,.2,1)'; r.el.style.transform = `translateY(${(r.to - r.idx) * r.h}px)`;
+  setTimeout(async () => { if (r.to !== r.idx){ const l = listFor('active'), [m] = l.splice(r.idx, 1); l.splice(r.to, 0, m);
+      const changed = []; l.forEach((it, k) => { if (it.order !== k){ it.order = k; changed.push(it); } });
+      render(); for (const it of changed){ try { await DB.put('items', it); } catch(err){} } }
+    else render(); }, 200); }
+document.addEventListener('pointerup', endReorder);
+document.addEventListener('pointercancel', endReorder);
 window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; if (['list','settings'].includes(view.name)) render(); });
 window.addEventListener('appinstalled', () => { installEvt = null; toast('Mi lista instalada'); if (['list','settings'].includes(view.name)) render(); });
 
@@ -233,7 +241,6 @@ window.addEventListener('appinstalled', () => { installEvt = null; toast('Mi lis
 (async () => {
   if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('sw.js', {scope:'./'}).catch(() => {});
   if (!window.indexedDB || !await DB.open()){ main.innerHTML = `<div class="empty"><h2>No se puede guardar</h2><p>Este navegador no permite guardar datos. Si estás en modo incógnito, abre la app en una pestaña normal.</p></div>`; return; }
-  try { const c = await DB.get('meta', 'cfg'); if (c) cfg = {k:'cfg', rate:num(c.rate)||0, fee:num(c.fee)||0, tax:Math.min(100, num(c.tax)||0)}; } catch(e){}
   try { items = (await DB.all('items')).map(clean).filter(Boolean); } catch(e){ items = []; }
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   const shared = sharedDraft();
